@@ -15,6 +15,9 @@ let lastTestResults = null;
 // Store active SSE clients
 let sseClients = [];
 
+// Store active test state
+let activeTest = null;
+
 // SSE endpoint for real-time progress
 app.get('/api/stress-test/progress', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -38,7 +41,69 @@ function sendProgress(data) {
     });
 }
 
-// Stress test endpoint
+// Stop test endpoint
+app.post('/api/stress-test/stop', (req, res) => {
+    if (activeTest) {
+        activeTest.shouldStop = true;
+        res.json({ success: true, message: 'Test stop requested' });
+    } else {
+        res.status(400).json({ error: 'No active test to stop' });
+    }
+});
+
+// Helper function to make a single request
+async function makeRequest(method, endpoint, headers, body, timeout) {
+    const requestStartTime = Date.now();
+    try {
+        const response = await axios({
+            method,
+            url: endpoint,
+            headers,
+            data: body,
+            timeout,
+            validateStatus: () => true
+        });
+        return {
+            success: true,
+            statusCode: response.status,
+            responseTime: Date.now() - requestStartTime,
+            size: JSON.stringify(response.data).length
+        };
+    } catch (error) {
+        return {
+            success: false,
+            statusCode: error.response?.status || 0,
+            responseTime: Date.now() - requestStartTime,
+            error: error.code || error.message,
+            size: 0
+        };
+    }
+}
+
+// Calculate summary helper
+function calculateSummary(results, startTime) {
+    const currentTime = Date.now();
+    const elapsedTime = currentTime - startTime;
+    const successCount = results.responses.filter(r => r.success).length;
+    const failCount = results.responses.filter(r => !r.success).length;
+    const responseTimes = results.responses.map(r => r.responseTime);
+    const avgResponseTime = responseTimes.length > 0 
+        ? (responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length).toFixed(2)
+        : 0;
+    const currentRPS = elapsedTime > 0 
+        ? ((results.responses.length / elapsedTime) * 1000).toFixed(2)
+        : 0;
+    
+    return {
+        successCount,
+        failCount,
+        avgResponseTime,
+        currentRPS,
+        elapsedTime
+    };
+}
+
+// Stress test endpoint with true concurrency
 app.post('/api/stress-test', async (req, res) => {
     const {
         endpoint,
@@ -65,70 +130,67 @@ app.post('/api/stress-test', async (req, res) => {
     };
 
     const startTime = Date.now();
+    
+    // Initialize active test state
+    activeTest = {
+        shouldStop: false,
+        results
+    };
 
-    // Process requests in batches
-    const batches = Math.ceil(totalRequests / concurrency);
-    let completedRequests = 0;
+    let requestsSent = 0;
+    let requestsCompleted = 0;
+    const activeRequests = new Set();
 
-    for (let batch = 0; batch < batches; batch++) {
-        const batchSize = Math.min(concurrency, totalRequests - completedRequests);
-        const batchPromises = [];
-
-        for (let i = 0; i < batchSize; i++) {
-            const requestStartTime = Date.now();
-            const requestPromise = axios({
-                method,
-                url: endpoint,
-                headers,
-                data: body,
-                timeout,
-                validateStatus: () => true // Accept all status codes
-            })
-                .then(response => ({
-                    success: true,
-                    statusCode: response.status,
-                    responseTime: Date.now() - requestStartTime,
-                    size: JSON.stringify(response.data).length
-                }))
-                .catch(error => ({
-                    success: false,
-                    statusCode: error.response?.status || 0,
-                    responseTime: Date.now() - requestStartTime,
-                    error: error.code || error.message,
-                    size: 0
-                }));
-
-            batchPromises.push(requestPromise);
-        }
-
-        const batchResults = await Promise.all(batchPromises);
-        results.responses.push(...batchResults);
-        completedRequests += batchSize;
-
-        // Send progress update
-        const currentTime = Date.now();
-        const elapsedTime = currentTime - startTime;
-        const successCount = results.responses.filter(r => r.success).length;
-        const failCount = results.responses.filter(r => !r.success).length;
-        const responseTimes = results.responses.map(r => r.responseTime);
-        const avgResponseTime = responseTimes.length > 0 
-            ? (responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length).toFixed(2)
-            : 0;
-        const currentRPS = elapsedTime > 0 
-            ? ((completedRequests / elapsedTime) * 1000).toFixed(2)
-            : 0;
-
+    // Function to send progress updates
+    const sendProgressUpdate = () => {
+        const stats = calculateSummary(results, startTime);
         sendProgress({
             type: 'progress',
-            completed: completedRequests,
+            completed: requestsCompleted,
             total: totalRequests,
-            percentage: ((completedRequests / totalRequests) * 100).toFixed(1),
-            successCount,
-            failCount,
-            avgResponseTime,
-            currentRPS,
-            elapsedTime
+            percentage: ((requestsCompleted / totalRequests) * 100).toFixed(1),
+            successCount: stats.successCount,
+            failCount: stats.failCount,
+            avgResponseTime: stats.avgResponseTime,
+            currentRPS: stats.currentRPS,
+            elapsedTime: stats.elapsedTime
         });
+    };
+
+    // Function to start a new request
+    const startRequest = async () => {
+        if (requestsSent >= totalRequests || activeTest.shouldStop) {
+            return;
+        }
+
+        requestsSent++;
+        const requestPromise = makeRequest(method, endpoint, headers, body, timeout)
+            .then(result => {
+                results.responses.push(result);
+                requestsCompleted++;
+                activeRequests.delete(requestPromise);
+                
+                // Send progress update
+                sendProgressUpdate();
+                
+                // Start next request to maintain concurrency
+                if (!activeTest.shouldStop && requestsSent < totalRequests) {
+                    startRequest();
+                }
+            });
+
+        activeRequests.add(requestPromise);
+    };
+
+    // Start initial batch of concurrent requests
+    const initialBatch = Math.min(concurrency, totalRequests);
+    for (let i = 0; i < initialBatch; i++) {
+        startRequest();
+    }
+
+    // Wait for all requests to complete or stop signal
+    while (activeRequests.size > 0 || (requestsCompleted < requestsSent && !activeTest.shouldStop)) {
+        await new Promise(resolve => setTimeout(resolve, 100));
     }
 
     const endTime = Date.now();
@@ -170,7 +232,11 @@ app.post('/api/stress-test', async (req, res) => {
     results.summary.p99 = sortedTimes[Math.floor(sortedTimes.length * 0.99)];
 
     results.endTime = new Date().toISOString();
+    results.stopped = activeTest.shouldStop;
     lastTestResults = results;
+    
+    // Clear active test
+    activeTest = null;
 
     res.json(results);
 });

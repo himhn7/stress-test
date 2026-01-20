@@ -106,13 +106,19 @@
                 </div>
 
                 <!-- Action Buttons -->
-                <div class="flex gap-4">
+                <div class="flex gap-4 mb-3">
                     <button id="runTest" onclick="runStressTest()"
                         class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center">
                         <i class="fas fa-play mr-2"></i>Run Stress Test
                     </button>
+                    <button id="stopTest" onclick="stopStressTest()" disabled
+                        class="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center">
+                        <i class="fas fa-stop mr-2"></i>Stop Test
+                    </button>
+                </div>
+                <div class="flex gap-4">
                     <button id="generateReport" onclick="generateReport()" disabled
-                        class="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center">
+                        class="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center">
                         <i class="fas fa-file-alt mr-2"></i>Generate Report
                     </button>
                 </div>
@@ -284,6 +290,33 @@
         const API_BASE = 'http://localhost:3001';
         let eventSource = null;
 
+        // Load saved configuration on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            loadSavedConfig();
+        });
+
+        function saveConfig(config) {
+            localStorage.setItem('stressTestConfig', JSON.stringify(config));
+        }
+
+        function loadSavedConfig() {
+            const saved = localStorage.getItem('stressTestConfig');
+            if (saved) {
+                try {
+                    const config = JSON.parse(saved);
+                    document.getElementById('endpoint').value = config.endpoint || '';
+                    document.getElementById('method').value = config.method || 'GET';
+                    document.getElementById('headers').value = config.headersText || '';
+                    document.getElementById('body').value = config.bodyText || '';
+                    document.getElementById('totalRequests').value = config.totalRequests || 100;
+                    document.getElementById('concurrency').value = config.concurrency || 10;
+                    document.getElementById('timeout').value = config.timeout || 30000;
+                } catch (e) {
+                    console.error('Failed to load saved config:', e);
+                }
+            }
+        }
+
         async function runStressTest() {
             const endpoint = document.getElementById('endpoint').value.trim();
             if (!endpoint) {
@@ -325,11 +358,23 @@
                 timeout: parseInt(document.getElementById('timeout').value)
             };
 
+            // Save configuration
+            saveConfig({
+                endpoint,
+                method: config.method,
+                headersText,
+                bodyText,
+                totalRequests: config.totalRequests,
+                concurrency: config.concurrency,
+                timeout: config.timeout
+            });
+
             // Show loading state
             document.getElementById('emptyState').classList.add('hidden');
             document.getElementById('resultsContent').classList.add('hidden');
             document.getElementById('loadingState').classList.remove('hidden');
             document.getElementById('runTest').disabled = true;
+            document.getElementById('stopTest').disabled = false;
             document.getElementById('generateReport').disabled = true;
 
             // Initialize progress display
@@ -374,6 +419,11 @@
                 
                 displayResults(results);
                 document.getElementById('generateReport').disabled = false;
+                
+                // Show notification if test was stopped
+                if (results.stopped) {
+                    alert('Test was stopped. Partial results are shown.');
+                }
             } catch (error) {
                 alert('Error running stress test: ' + error.message);
                 document.getElementById('loadingState').classList.add('hidden');
@@ -386,6 +436,24 @@
                 }
             } finally {
                 document.getElementById('runTest').disabled = false;
+                document.getElementById('stopTest').disabled = true;
+            }
+        }
+
+        async function stopStressTest() {
+            try {
+                const response = await fetch(`${API_BASE}/api/stress-test/stop`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    document.getElementById('stopTest').disabled = true;
+                }
+            } catch (error) {
+                console.error('Error stopping test:', error);
+                alert('Failed to stop test: ' + error.message);
             }
         }
 
