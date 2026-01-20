@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Stress Tester</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .json-editor {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-blue-400 mb-2">
+                <i class="fas fa-bolt mr-2"></i>API Stress Tester
+            </h1>
+            <p class="text-gray-400">Test your API endpoints with configurable load</p>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Configuration Panel -->
+            <div class="bg-gray-800 rounded-xl p-6 shadow-xl">
+                <h2 class="text-xl font-semibold mb-4 text-blue-300">
+                    <i class="fas fa-cog mr-2"></i>Test Configuration
+                </h2>
+
+                <!-- Endpoint -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-300 mb-1">API Endpoint *</label>
+                    <input type="url" id="endpoint" placeholder="https://api.example.com/endpoint"
+                        class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                </div>
+
+                <!-- Method -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-300 mb-1">HTTP Method</label>
+                    <select id="method"
+                        class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500">
+                        <option value="GET">GET</option>
+                        <option value="POST">POST</option>
+                        <option value="PUT">PUT</option>
+                        <option value="PATCH">PATCH</option>
+                        <option value="DELETE">DELETE</option>
+                    </select>
+                </div>
+
+                <!-- Headers -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-300 mb-1">
+                        Headers (JSON format)
+                        <span class="text-gray-500 text-xs ml-2">Include API keys, tokens, auth headers here</span>
+                    </label>
+                    <textarea id="headers" rows="4" placeholder='{
+  "Authorization": "Bearer your-token",
+  "Content-Type": "application/json",
+  "X-API-Key": "your-api-key"
+}'
+                        class="json-editor w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 text-sm"></textarea>
+                </div>
+
+                <!-- Request Body -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-300 mb-1">Request Body (JSON)</label>
+                    <textarea id="body" rows="4" placeholder='{
+  "key": "value"
+}'
+                        class="json-editor w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 text-sm"></textarea>
+                </div>
+
+                <!-- Load Configuration -->
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Total Requests</label>
+                        <input type="number" id="totalRequests" value="100" min="1" max="10000"
+                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Concurrency</label>
+                        <input type="number" id="concurrency" value="10" min="1" max="100"
+                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+
+                <!-- Timeout -->
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-300 mb-1">Timeout (ms)</label>
+                    <input type="number" id="timeout" value="30000" min="1000" max="120000"
+                        class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex gap-4">
+                    <button id="runTest" onclick="runStressTest()"
+                        class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center">
+                        <i class="fas fa-play mr-2"></i>Run Stress Test
+                    </button>
+                    <button id="generateReport" onclick="generateReport()" disabled
+                        class="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center">
+                        <i class="fas fa-file-alt mr-2"></i>Generate Report
+                    </button>
+                </div>
+            </div>
+
+            <!-- Results Panel -->
+            <div class="bg-gray-800 rounded-xl p-6 shadow-xl">
+                <h2 class="text-xl font-semibold mb-4 text-green-300">
+                    <i class="fas fa-chart-bar mr-2"></i>Test Results
+                </h2>
+
+                <!-- Loading State -->
+                <div id="loadingState" class="hidden flex flex-col items-center justify-center py-16">
+                    <div class="loader mb-4"></div>
+                    <p class="text-gray-400">Running stress test...</p>
+                    <p id="progressText" class="text-sm text-gray-500 mt-2"></p>
+                </div>
+
+                <!-- Empty State -->
+                <div id="emptyState" class="flex flex-col items-center justify-center py-16 text-gray-500">
+                    <i class="fas fa-flask text-6xl mb-4"></i>
+                    <p>Configure and run a test to see results</p>
+                </div>
+
+                <!-- Results Content -->
+                <div id="resultsContent" class="hidden">
+                    <!-- Summary Cards -->
+                    <div class="grid grid-cols-2 gap-4 mb-6">
+                        <div class="bg-gray-700 rounded-lg p-4">
+                            <div class="text-2xl font-bold text-blue-400" id="rps">-</div>
+                            <div class="text-sm text-gray-400">Requests/Second</div>
+                        </div>
+                        <div class="bg-gray-700 rounded-lg p-4">
+                            <div class="text-2xl font-bold text-green-400" id="successRate">-</div>
+                            <div class="text-sm text-gray-400">Success Rate</div>
+                        </div>
+                        <div class="bg-gray-700 rounded-lg p-4">
+                            <div class="text-2xl font-bold text-yellow-400" id="avgTime">-</div>
+                            <div class="text-sm text-gray-400">Avg Response Time</div>
+                        </div>
+                        <div class="bg-gray-700 rounded-lg p-4">
+                            <div class="text-2xl font-bold text-purple-400" id="totalTime">-</div>
+                            <div class="text-sm text-gray-400">Total Time</div>
+                        </div>
+                    </div>
+
+                    <!-- Detailed Stats -->
+                    <div class="bg-gray-700 rounded-lg p-4 mb-4">
+                        <h3 class="font-semibold mb-3 text-gray-300">Response Time Percentiles</h3>
+                        <div class="grid grid-cols-4 gap-2 text-center">
+                            <div>
+                                <div class="text-lg font-bold text-blue-300" id="p50">-</div>
+                                <div class="text-xs text-gray-400">P50</div>
+                            </div>
+                            <div>
+                                <div class="text-lg font-bold text-blue-300" id="p90">-</div>
+                                <div class="text-xs text-gray-400">P90</div>
+                            </div>
+                            <div>
+                                <div class="text-lg font-bold text-blue-300" id="p95">-</div>
+                                <div class="text-xs text-gray-400">P95</div>
+                            </div>
+                            <div>
+                                <div class="text-lg font-bold text-blue-300" id="p99">-</div>
+                                <div class="text-xs text-gray-400">P99</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Min/Max -->
+                    <div class="bg-gray-700 rounded-lg p-4 mb-4">
+                        <h3 class="font-semibold mb-3 text-gray-300">Response Time Range</h3>
+                        <div class="flex justify-between">
+                            <div>
+                                <span class="text-gray-400">Min:</span>
+                                <span class="font-bold text-green-400 ml-2" id="minTime">-</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-400">Max:</span>
+                                <span class="font-bold text-red-400 ml-2" id="maxTime">-</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Status Codes -->
+                    <div class="bg-gray-700 rounded-lg p-4 mb-4">
+                        <h3 class="font-semibold mb-3 text-gray-300">Status Code Distribution</h3>
+                        <div id="statusCodes" class="space-y-2"></div>
+                    </div>
+
+                    <!-- Errors -->
+                    <div id="errorsSection" class="bg-gray-700 rounded-lg p-4 hidden">
+                        <h3 class="font-semibold mb-3 text-red-300">Errors</h3>
+                        <div id="errors" class="space-y-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Report Modal -->
+        <div id="reportModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-gray-800 rounded-xl p-6 max-w-3xl w-full mx-4 max-h-[80vh] overflow-auto">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-semibold text-green-300">
+                        <i class="fas fa-file-alt mr-2"></i>Report Generated
+                    </h3>
+                    <button onclick="closeModal()" class="text-gray-400 hover:text-white">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                <div class="bg-gray-900 rounded-lg p-4 mb-4">
+                    <p class="text-sm text-gray-400 mb-2">Saved to:</p>
+                    <code id="reportPath" class="text-green-400 text-sm break-all"></code>
+                </div>
+                <div class="bg-gray-900 rounded-lg p-4 overflow-auto max-h-96">
+                    <pre id="reportContent" class="text-sm text-gray-300 whitespace-pre-wrap"></pre>
+                </div>
+                <div class="mt-4 flex justify-end">
+                    <button onclick="closeModal()" class="bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded-lg">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3001';
+
+        async function runStressTest() {
+            const endpoint = document.getElementById('endpoint').value.trim();
+            if (!endpoint) {
+                alert('Please enter an API endpoint');
+                return;
+            }
+
+            // Parse headers
+            let headers = {};
+            const headersText = document.getElementById('headers').value.trim();
+            if (headersText) {
+                try {
+                    headers = JSON.parse(headersText);
+                } catch (e) {
+                    alert('Invalid JSON in headers field');
+                    return;
+                }
+            }
+
+            // Parse body
+            let body = null;
+            const bodyText = document.getElementById('body').value.trim();
+            if (bodyText) {
+                try {
+                    body = JSON.parse(bodyText);
+                } catch (e) {
+                    alert('Invalid JSON in request body field');
+                    return;
+                }
+            }
+
+            const config = {
+                endpoint,
+                method: document.getElementById('method').value,
+                headers,
+                body,
+                totalRequests: parseInt(document.getElementById('totalRequests').value),
+                concurrency: parseInt(document.getElementById('concurrency').value),
+                timeout: parseInt(document.getElementById('timeout').value)
+            };
+
+            // Show loading state
+            document.getElementById('emptyState').classList.add('hidden');
+            document.getElementById('resultsContent').classList.add('hidden');
+            document.getElementById('loadingState').classList.remove('hidden');
+            document.getElementById('runTest').disabled = true;
+            document.getElementById('generateReport').disabled = true;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/stress-test`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+
+                const results = await response.json();
+                displayResults(results);
+                document.getElementById('generateReport').disabled = false;
+            } catch (error) {
+                alert('Error running stress test: ' + error.message);
+                document.getElementById('loadingState').classList.add('hidden');
+                document.getElementById('emptyState').classList.remove('hidden');
+            } finally {
+                document.getElementById('runTest').disabled = false;
+            }
+        }
+
+        function displayResults(results) {
+            document.getElementById('loadingState').classList.add('hidden');
+            document.getElementById('resultsContent').classList.remove('hidden');
+
+            const summary = results.summary;
+
+            // Update summary cards
+            document.getElementById('rps').textContent = summary.requestsPerSecond;
+            document.getElementById('successRate').textContent = summary.successRate + '%';
+            document.getElementById('avgTime').textContent = summary.avgResponseTime + 'ms';
+            document.getElementById('totalTime').textContent = summary.totalTime + 'ms';
+
+            // Update percentiles
+            document.getElementById('p50').textContent = summary.p50 + 'ms';
+            document.getElementById('p90').textContent = summary.p90 + 'ms';
+            document.getElementById('p95').textContent = summary.p95 + 'ms';
+            document.getElementById('p99').textContent = summary.p99 + 'ms';
+
+            // Update min/max
+            document.getElementById('minTime').textContent = summary.minResponseTime + 'ms';
+            document.getElementById('maxTime').textContent = summary.maxResponseTime + 'ms';
+
+            // Status codes
+            const statusCodesDiv = document.getElementById('statusCodes');
+            statusCodesDiv.innerHTML = '';
+            for (const [code, count] of Object.entries(summary.statusCodes)) {
+                const percentage = ((count / summary.totalRequests) * 100).toFixed(1);
+                const colorClass = code.startsWith('2') ? 'bg-green-500' : 
+                                   code.startsWith('4') ? 'bg-yellow-500' : 
+                                   code.startsWith('5') ? 'bg-red-500' : 'bg-gray-500';
+                statusCodesDiv.innerHTML += `
+                    <div class="flex items-center">
+                        <span class="w-16 text-sm">${code}</span>
+                        <div class="flex-1 bg-gray-600 rounded-full h-4 mx-2">
+                            <div class="${colorClass} h-4 rounded-full" style="width: ${percentage}%"></div>
+                        </div>
+                        <span class="w-20 text-sm text-right">${count} (${percentage}%)</span>
+                    </div>
+                `;
+            }
+
+            // Errors
+            const errorsSection = document.getElementById('errorsSection');
+            const errorsDiv = document.getElementById('errors');
+            if (Object.keys(summary.errors).length > 0) {
+                errorsSection.classList.remove('hidden');
+                errorsDiv.innerHTML = '';
+                for (const [error, count] of Object.entries(summary.errors)) {
+                    errorsDiv.innerHTML += `
+                        <div class="flex justify-between text-sm">
+                            <span class="text-red-400">${error}</span>
+                            <span class="text-gray-400">${count}</span>
+                        </div>
+                    `;
+                }
+            } else {
+                errorsSection.classList.add('hidden');
+            }
+        }
+
+        async function generateReport() {
+            try {
+                const response = await fetch(`${API_BASE}/api/generate-report`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const result = await response.json();
+                if (result.error) {
+                    alert(result.error);
+                    return;
+                }
+
+                document.getElementById('reportPath').textContent = result.filepath;
+                document.getElementById('reportContent').textContent = result.content;
+                document.getElementById('reportModal').classList.remove('hidden');
+            } catch (error) {
+                alert('Error generating report: ' + error.message);
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('reportModal').classList.add('hidden');
+        }
+
+        // Close modal on escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModal();
+        });
+    </script>
+</body>
+</html>
