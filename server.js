@@ -12,6 +12,32 @@ app.use(express.static('public'));
 // Store test results for report generation
 let lastTestResults = null;
 
+// Store active SSE clients
+let sseClients = [];
+
+// SSE endpoint for real-time progress
+app.get('/api/stress-test/progress', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const clientId = Date.now();
+    const newClient = { id: clientId, res };
+    sseClients.push(newClient);
+
+    req.on('close', () => {
+        sseClients = sseClients.filter(client => client.id !== clientId);
+    });
+});
+
+// Helper function to send progress updates
+function sendProgress(data) {
+    sseClients.forEach(client => {
+        client.res.write(`data: ${JSON.stringify(data)}\n\n`);
+    });
+}
+
 // Stress test endpoint
 app.post('/api/stress-test', async (req, res) => {
     const {
@@ -78,6 +104,31 @@ app.post('/api/stress-test', async (req, res) => {
         const batchResults = await Promise.all(batchPromises);
         results.responses.push(...batchResults);
         completedRequests += batchSize;
+
+        // Send progress update
+        const currentTime = Date.now();
+        const elapsedTime = currentTime - startTime;
+        const successCount = results.responses.filter(r => r.success).length;
+        const failCount = results.responses.filter(r => !r.success).length;
+        const responseTimes = results.responses.map(r => r.responseTime);
+        const avgResponseTime = responseTimes.length > 0 
+            ? (responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length).toFixed(2)
+            : 0;
+        const currentRPS = elapsedTime > 0 
+            ? ((completedRequests / elapsedTime) * 1000).toFixed(2)
+            : 0;
+
+        sendProgress({
+            type: 'progress',
+            completed: completedRequests,
+            total: totalRequests,
+            percentage: ((completedRequests / totalRequests) * 100).toFixed(1),
+            successCount,
+            failCount,
+            avgResponseTime,
+            currentRPS,
+            elapsedTime
+        });
     }
 
     const endTime = Date.now();

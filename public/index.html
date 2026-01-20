@@ -125,10 +125,51 @@
                 </h2>
 
                 <!-- Loading State -->
-                <div id="loadingState" class="hidden flex flex-col items-center justify-center py-16">
-                    <div class="loader mb-4"></div>
-                    <p class="text-gray-400">Running stress test...</p>
-                    <p id="progressText" class="text-sm text-gray-500 mt-2"></p>
+                <div id="loadingState" class="hidden py-4">
+                    <div class="flex flex-col items-center mb-6">
+                        <div class="loader mb-4"></div>
+                        <p class="text-gray-400 font-semibold">Running stress test...</p>
+                    </div>
+                    
+                    <!-- Progress Bar -->
+                    <div class="mb-6">
+                        <div class="flex justify-between text-sm mb-2">
+                            <span class="text-gray-400">Progress</span>
+                            <span class="text-blue-400 font-semibold" id="progressPercentage">0%</span>
+                        </div>
+                        <div class="w-full bg-gray-700 rounded-full h-3">
+                            <div id="progressBar" class="bg-blue-500 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+                        </div>
+                        <div class="flex justify-between text-xs text-gray-500 mt-1">
+                            <span id="progressCompleted">0</span>
+                            <span id="progressTotal">0</span>
+                        </div>
+                    </div>
+
+                    <!-- Live Stats -->
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div class="bg-gray-700 rounded-lg p-3">
+                            <div class="text-xl font-bold text-blue-400" id="liveRPS">-</div>
+                            <div class="text-xs text-gray-400">Current RPS</div>
+                        </div>
+                        <div class="bg-gray-700 rounded-lg p-3">
+                            <div class="text-xl font-bold text-yellow-400" id="liveAvgTime">-</div>
+                            <div class="text-xs text-gray-400">Avg Response Time</div>
+                        </div>
+                        <div class="bg-gray-700 rounded-lg p-3">
+                            <div class="text-xl font-bold text-green-400" id="liveSuccess">-</div>
+                            <div class="text-xs text-gray-400">Successful</div>
+                        </div>
+                        <div class="bg-gray-700 rounded-lg p-3">
+                            <div class="text-xl font-bold text-red-400" id="liveFailed">-</div>
+                            <div class="text-xs text-gray-400">Failed</div>
+                        </div>
+                    </div>
+
+                    <!-- Elapsed Time -->
+                    <div class="text-center text-sm text-gray-400">
+                        Elapsed: <span id="elapsedTime" class="text-gray-300 font-semibold">0s</span>
+                    </div>
                 </div>
 
                 <!-- Empty State -->
@@ -241,6 +282,7 @@
 
     <script>
         const API_BASE = 'http://localhost:3001';
+        let eventSource = null;
 
         async function runStressTest() {
             const endpoint = document.getElementById('endpoint').value.trim();
@@ -290,6 +332,31 @@
             document.getElementById('runTest').disabled = true;
             document.getElementById('generateReport').disabled = true;
 
+            // Initialize progress display
+            document.getElementById('progressPercentage').textContent = '0%';
+            document.getElementById('progressBar').style.width = '0%';
+            document.getElementById('progressCompleted').textContent = '0';
+            document.getElementById('progressTotal').textContent = config.totalRequests;
+            document.getElementById('liveRPS').textContent = '0';
+            document.getElementById('liveAvgTime').textContent = '0ms';
+            document.getElementById('liveSuccess').textContent = '0';
+            document.getElementById('liveFailed').textContent = '0';
+            document.getElementById('elapsedTime').textContent = '0s';
+
+            // Connect to SSE for progress updates
+            eventSource = new EventSource(`${API_BASE}/api/stress-test/progress`);
+            
+            eventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'progress') {
+                    updateProgress(data);
+                }
+            };
+
+            eventSource.onerror = (error) => {
+                console.error('SSE error:', error);
+            };
+
             try {
                 const response = await fetch(`${API_BASE}/api/stress-test`, {
                     method: 'POST',
@@ -298,15 +365,45 @@
                 });
 
                 const results = await response.json();
+                
+                // Close SSE connection
+                if (eventSource) {
+                    eventSource.close();
+                    eventSource = null;
+                }
+                
                 displayResults(results);
                 document.getElementById('generateReport').disabled = false;
             } catch (error) {
                 alert('Error running stress test: ' + error.message);
                 document.getElementById('loadingState').classList.add('hidden');
                 document.getElementById('emptyState').classList.remove('hidden');
+                
+                // Close SSE connection on error
+                if (eventSource) {
+                    eventSource.close();
+                    eventSource = null;
+                }
             } finally {
                 document.getElementById('runTest').disabled = false;
             }
+        }
+
+        function updateProgress(data) {
+            // Update progress bar
+            document.getElementById('progressPercentage').textContent = data.percentage + '%';
+            document.getElementById('progressBar').style.width = data.percentage + '%';
+            document.getElementById('progressCompleted').textContent = data.completed;
+            
+            // Update live stats
+            document.getElementById('liveRPS').textContent = data.currentRPS;
+            document.getElementById('liveAvgTime').textContent = data.avgResponseTime + 'ms';
+            document.getElementById('liveSuccess').textContent = data.successCount;
+            document.getElementById('liveFailed').textContent = data.failCount;
+            
+            // Update elapsed time
+            const seconds = (data.elapsedTime / 1000).toFixed(1);
+            document.getElementById('elapsedTime').textContent = seconds + 's';
         }
 
         function displayResults(results) {
